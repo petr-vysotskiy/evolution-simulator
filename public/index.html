@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Matter.js WebSocket Client</title>
+</head>
+<body>
+    <canvas id="world"></canvas>
+    
+    <!-- Load Matter.js and Protobuf.js from CDNs -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.17.1/matter.min.js"></script>
+    <script src="//cdn.jsdelivr.net/npm/protobufjs@7.X.X/dist/protobuf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.0.4/pako.min.js"></script> <!-- For gzip decompression -->
+
+    <script>
+        const { Engine, Render, World, Bodies, Constraint, Body } = Matter;
+
+        const engine = Engine.create();
+        const world = engine.world;
+
+        const canvas = document.getElementById('world');
+        const render = Render.create({
+            canvas: canvas,
+            engine: engine,
+            options: {
+                width: 800,
+                height: 600,
+                wireframes: false
+            }
+        });
+
+        Render.run(render);
+
+        const idToBodyMap = {};
+        const idToConstraintMap = {};
+
+        // Load the protobuf schema
+        protobuf.load("/world.proto", function(err, root) {
+            if (err) throw err;
+
+            const WorldUpdate = root.lookupType("WorldUpdate");
+
+            const ws = new WebSocket('ws://localhost:3000');
+
+            // Set the binary type to arraybuffer
+            ws.binaryType = 'arraybuffer';
+
+            ws.onmessage = function(event) {
+                const arrayBuffer = event.data;
+
+                if (arrayBuffer.byteLength === 0) {
+                    console.warn("Received empty data.");
+                    return;
+                }
+
+                try {
+                    // Decompress the gzipped data
+                    const decompressedData = pako.ungzip(new Uint8Array(arrayBuffer));
+
+                    // Decode the protobuf message
+                    const worldUpdate = WorldUpdate.decode(decompressedData);
+
+                    console.log(`Received ${worldUpdate.bodies.length} bodies and ${worldUpdate.constraints.length} constraints.`);
+
+                    // Handle bodies update
+                    worldUpdate.bodies.forEach(bodyData => {
+                        let body = idToBodyMap[bodyData.id];
+                        
+                        if (body) {
+                            Body.setPosition(body, {
+                                x: bodyData.position.x,
+                                y: bodyData.position.y
+                            });
+                            Body.setAngle(body, bodyData.angle);
+                        } else {
+                            body = Bodies.circle(bodyData.position.x, bodyData.position.y, 5, {
+                                isStatic: bodyData.isStatic
+                            });
+                            idToBodyMap[bodyData.id] = body;
+                            World.add(world, body);
+                        }
+                    });
+
+                    // Handle constraints update
+                    worldUpdate.constraints.forEach(constraintData => {
+                        let constraint = idToConstraintMap[constraintData.id];
+                        
+                        const bodyA = idToBodyMap[constraintData.bodyA];
+                        const bodyB = idToBodyMap[constraintData.bodyB];
+
+                        if (constraint) {
+                            constraint.bodyA = bodyA;
+                            constraint.bodyB = bodyB;
+                            constraint.pointA = {
+                                x: constraintData.pointA.x,
+                                y: constraintData.pointA.y
+                            };
+                            constraint.pointB = {
+                                x: constraintData.pointB.x,
+                                y: constraintData.pointB.y
+                            };
+                            constraint.length = constraintData.length;
+                            constraint.stiffness = constraintData.stiffness;
+                        } else {
+                            constraint = Constraint.create({
+                                bodyA: bodyA,
+                                bodyB: bodyB,
+                                pointA: {
+                                    x: constraintData.pointA.x,
+                                    y: constraintData.pointA.y
+                                },
+                                pointB: {
+                                    x: constraintData.pointB.x,
+                                    y: constraintData.pointB.y
+                                },
+                                length: constraintData.length,
+                                stiffness: constraintData.stiffness,
+                                render: {
+                                    strokeStyle: 'red',
+                                    lineWidth: 3
+                                }
+                            });
+                            idToConstraintMap[constraintData.id] = constraint;
+                            World.add(world, constraint);
+                        }
+                    });
+
+                } catch (error) {
+                    console.error("Failed to process incoming data:", error);
+                }
+            };
+        });
+    </script>
+</body>
+</html>

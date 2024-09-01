@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+message Vector2 {
+    float x = 1;
+    float y = 2;
+}
+
+message Body {
+    uint32 id = 1;
+    string label = 2;
+    Vector2 position = 3;
+    float angle = 4;
+    Vector2 velocity = 5;
+    float angularVelocity = 6;
+    bool isStatic = 7;
+    bool isSleeping = 8;
+}
+
+message Constraint {
+    uint32 id = 1;
+    string label = 2;
+    uint32 bodyA = 3;
+    uint32 bodyB = 4;
+    Vector2 pointA = 5;
+    Vector2 pointB = 6;
+    float length = 7;
+    float stiffness = 8;
+}
+
+message WorldUpdate {
+    repeated Body bodies = 1;
+    repeated Constraint constraints = 2;
+}
